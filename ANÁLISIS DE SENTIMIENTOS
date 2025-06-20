@@ -1,0 +1,62 @@
+#APLICAR ANÁLISIS DE SENTIMIENTO
+from textblob import TextBlob
+
+df = df.copy()
+
+df['texto_filtrado'] = df['texto_stemmed'].fillna("")
+
+def obtener_sentimiento(texto):
+    try:
+        blob = TextBlob(texto)
+        return blob.sentiment.polarity
+    except:
+        return None
+
+df['sentimiento_textblob'] = df['texto_filtrado'].dropna().apply(obtener_sentimiento)
+
+#CLASIFICAR POSIT/NEGAT/NEUTR
+def clasificar_polaridad(p):
+    if p is None:
+        return 'desconocido'
+    elif p > 0.01:
+        return 'positivo'
+    elif p < -0.01:
+        return 'negativo'
+    else:
+        return 'neutral'
+
+df['clasificacion_textblob'] = df['sentimiento_textblob'].apply(clasificar_polaridad)
+
+#VISUALIZACIÓN RESULTADOS
+sns.countplot(x='clasificacion_textblob', data=df, order=['positivo', 'neutral', 'negativo', 'desconocido'], palette='coolwarm')
+plt.title('Distribución de sentimientos con TextBlob')
+plt.xlabel('Sentimiento')
+plt.ylabel('Cantidad de reseñas')
+plt.tight_layout()
+plt.show()
+
+#CARGAR EL MODELO BERT Y PIPELINE
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+
+modelo = "nlptown/bert-base-multilingual-uncased-sentiment"
+tokenizer = AutoTokenizer.from_pretrained(modelo)
+modelo_sentimiento = AutoModelForSequenceClassification.from_pretrained(modelo)
+
+analisis = pipeline("sentiment-analysis", model=modelo_sentimiento, tokenizer=tokenizer)
+
+#APLICAR EL MODELO A LAS 100 PRIMERAS RESEÑAS
+from tqdm import tqdm
+tqdm.pandas()
+
+df['sentimiento_bert'] = df['texto_filtrado'].head(100).progress_apply(lambda x: analisis(x)[0]['label'])
+df = df.dropna(subset=['sentimiento_bert']).copy()
+df['estrellas_bert'] = df['sentimiento_bert'].str[0].astype(int)
+
+#VISUALIZAR LA DISTRIBUCIÓN
+import matplotlib.pyplot as plt
+
+sns.countplot(x='estrellas_bert', data=df, palette='coolwarm')
+plt.title('Distribución de sentimientos con BERT')
+plt.xlabel('Número de estrellas')
+plt.ylabel('Cantidad de reseñas')
+plt.show()
