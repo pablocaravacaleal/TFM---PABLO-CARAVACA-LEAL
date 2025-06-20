@@ -1,0 +1,128 @@
+#SELECCIONAR VARIABLES
+
+import pandas as pd
+
+variables_seleccionadas = [
+    'listing_id',
+    'price',
+    'room_type',
+    'neighbourhood',
+    'minimum_nights',
+    'availability_365',
+    'number_of_reviews',
+    'number_of_reviews_ltm'
+]
+
+df_selected = df[variables_seleccionadas].copy()
+df_selected.head()
+
+#LIMPIEZA Y CODIFICACIÓN
+
+df_selected = df_selected.drop_duplicates(subset='listing_id')
+
+df_selected = df_selected.dropna()
+
+df_selected.set_index('listing_id', inplace=True)
+
+df_selected.info()
+
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+
+#CODIFICACIÓN DE CATEGÓRICAS + ESTANDARIZACIÓN DE NUMÉRICAS
+
+cat_features = ['room_type', 'neighbourhood']
+num_features = ['price', 'minimum_nights', 'availability_365', 'number_of_reviews', 'number_of_reviews_ltm']
+
+preprocessor = ColumnTransformer(transformers=[
+    ('cat', OneHotEncoder(handle_unknown='ignore'), cat_features),
+    ('num', StandardScaler(), num_features)
+])
+
+X_processed = preprocessor.fit_transform(df_selected)
+
+X_processed.shape
+
+#MÉTODOS DEL CODO Y SILUETA
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+import matplotlib.pyplot as plt
+
+range_n_clusters = list(range(2, 8))
+SSQ = []
+sil_avg = []
+
+for n_clusters in range_n_clusters:
+    kmeans = KMeans(n_clusters=n_clusters, random_state=10, n_init=10)
+    cluster_labels = kmeans.fit_predict(X_processed)
+
+    SSQ.append(kmeans.inertia_)
+
+    sil_avg.append(silhouette_score(X_processed, cluster_labels))
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+ax1.plot(range_n_clusters, SSQ, marker='o', color='royalblue')
+ax1.set_title("Método del codo")
+ax1.set_xlabel("Número de clusters")
+ax1.set_ylabel("Inercia")
+
+ax2.plot(range_n_clusters, sil_avg, marker='o', color='darkorange')
+ax2.set_title("Método de Silhouette")
+ax2.set_xlabel("Número de clusters")
+ax2.set_ylabel("Valor Silhouette")
+
+plt.tight_layout()
+plt.show()
+
+#K-MEANS CON K=3
+kmeans_final = KMeans(n_clusters=3, random_state=42, n_init=10)
+labels_final = kmeans_final.fit_predict(X_processed)
+df_selected['cluster'] = labels_final
+
+#PCA
+from sklearn.decomposition import PCA
+pca = PCA(n_components=2)
+X_pca = pca.fit_transform(X_processed)
+
+df_plot = pd.DataFrame(X_pca, columns=['PC1', 'PC2'])
+df_plot['cluster'] = labels_final
+df_plot_filtrado = df_plot.copy()
+
+umbral_pc2 = df_plot_filtrado[df_plot_filtrado['cluster'] == 0]['PC2'].quantile(0.99)
+df_plot_filtrado = df_plot_filtrado[~((df_plot_filtrado['cluster'] == 0) & (df_plot_filtrado['PC2'] > umbral_pc2))]
+umbral_pc1 = df_plot_filtrado[df_plot_filtrado['cluster'] == 1]['PC1'].quantile(0.99)
+df_plot_filtrado = df_plot_filtrado[~((df_plot_filtrado['cluster'] == 1) & (df_plot_filtrado['PC1'] > umbral_pc1))]
+
+#VISUALIZACIÓN
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=df_plot_filtrado, x='PC1', y='PC2', hue='cluster', palette='Set2', s=60)
+plt.title("Visualización del clustering estructural con K-Means (k=3)")
+plt.xlabel("Componente Principal 1")
+plt.ylabel("Componente Principal 2")
+plt.legend(title='Cluster')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+#CENTROIDES
+scaler = preprocessor.named_transformers_['num']
+centroides_numericas = pd.DataFrame(
+    scaler.inverse_transform(kmeans_final.cluster_centers_[:, -len(num_features):]),
+    columns=num_features
+)
+centroides_numericas['cluster'] = centroides_numericas.index
+centroides_numericas = centroides_numericas.drop(columns='cluster')
+
+#MEDIA DE LOS CLSUTERES
+resumen_clusters = df_selected.groupby('cluster')[num_features].mean().round(2).reset_index()
+
+print(centroides_numericas)
+
+centroides_limpio = centroides_numericas.round(2).reset_index()
+
+centroides_limpio.index.name = 'Cluster'
+centroides_limpio = centroides_limpio.drop(columns='index')
+
+from tabulate import tabulate
+print(tabulate(centroides_limpio, headers='keys', tablefmt='pretty'))
