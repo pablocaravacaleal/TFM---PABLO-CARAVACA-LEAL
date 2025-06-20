@@ -1,0 +1,83 @@
+import pandas as pd
+import nltk
+import re
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+
+nltk.download('stopwords')
+nltk.download('wordnet')
+nltk.download('punkt')
+
+listings = pd.read_csv('listings.csv')
+reviews = pd.read_csv('reviews.csv')
+
+df_merged = pd.merge(
+    reviews,
+    listings.drop(columns=['neighbourhood_group']),
+    left_on='listing_id',
+    right_on='id',
+    suffixes=('_review', '_listing')
+)
+
+pd.merge(reviews, listings.drop(columns=['neighbourhood_group']), left_on='listing_id', right_on='id').shape
+
+#FILTRAR RESEÑAS AL CASTELLANO
+
+from langdetect import detect
+from langdetect.lang_detect_exception import LangDetectException
+
+def detectar_idioma(texto):
+    try:
+        return detect(texto) if isinstance(texto, str) else 'unknown'
+    except LangDetectException:
+        return 'unknown'
+
+df_merged['idioma'] = df_merged['comments'].apply(detectar_idioma)
+
+df_es = df_merged[df_merged['idioma'] == 'es'].copy()
+
+#ELIMINAR DUPLICADOS
+
+df_es = df_es.drop_duplicates(subset=['comments'])
+
+# NORMALIZACIÓN DEL TEXTO
+
+df_es['comentario_normalizado'] = df_es['comments'].str.lower()\
+    .str.replace(r'[^a-záéíóúñü\s]', '', regex=True)\
+    .str.replace(r'\s+', ' ', regex=True)\
+    .str.strip()
+
+# TOKENIZACIÓN
+
+df_es['tokens'] = df_es['comentario_normalizado'].apply(word_tokenize)
+
+# LEMATIZACIÓN
+# stemming
+
+from nltk.stem.snowball import SnowballStemmer
+stemmer = SnowballStemmer("spanish")
+
+df_es['stems'] = df_es['tokens'].apply(lambda tokens: [stemmer.stem(w) for w in tokens])
+
+#ELIMINACIÓN DE STOPWORDS
+
+stopwords_es = set(stopwords.words('spanish'))
+
+df_es['tokens_filtrados'] = df_es['tokens'].apply(
+    lambda x: [palabra for palabra in x if palabra not in stopwords_es]
+)
+
+df_es['stems_filtrados'] = df_es['stems'].apply(
+    lambda x: [palabra for palabra in x if palabra not in stopwords_es]
+)
+
+# Texto limpio para sentimiento
+df_es['texto_filtrado'] = df_es['tokens_filtrados'].apply(lambda x: ' '.join(x))
+
+# Texto reducido para clustering
+df_es['texto_stemmed'] = df_es['stems_filtrados'].apply(lambda x: ' '.join(x))
+
+#GUARDAR CSV CON RESEÑAS YA PROCESADAS
+
+df_es.to_csv('reseñas_preprocesadas.csv', index=False)
